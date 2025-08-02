@@ -1,12 +1,20 @@
 import pandas as pd
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 
-def process_sla_data(df, date_filter_str):
-    # Step 1: Parse dates
-    df['Order Date'] = pd.to_datetime(df['Order Date'], errors='coerce', dayfirst=True)
-    df['End Time (Actual)'] = pd.to_datetime(df['End Time (Actual)'], errors='coerce', dayfirst=True)
+def clean_cell(val):
+    if pd.isna(val): return val
+    return re.sub(r'\=\(\"?([^\"]+)\"?\)?', r'\1', str(val)).strip()
 
-    # Step 2: Filter by valid dark stores
+def process_sla_data(df, filter_date_str):
+    # Step 1: Clean weird Excel-formatted strings
+    df = df.applymap(clean_cell)
+
+    # Step 2: Convert to datetime
+    df['Order Date'] = pd.to_datetime(df['Order Date'], format="%d/%m/%Y %I:%M %p", errors='coerce')
+    df['End Time (Actual)'] = pd.to_datetime(df['End Time (Actual)'], format="%d/%m/%Y %I:%M %p", errors='coerce')
+
+    # Step 3: Filter by valid dark stores
     valid_stores = [
         "BLR_kalyan-nagar", "BLR_koramangala", "CH_Periyamet",
         "DEL_malviya-nagar", "HYD_manikonda", "KOL-Topsia",
@@ -14,52 +22,77 @@ def process_sla_data(df, date_filter_str):
     ]
     df = df[df['Order Dark Store'].isin(valid_stores)]
 
-    # Step 3: Filter Delivered
+    # Step 4: Filter delivered orders
     df = df[df['Order Status'].str.lower() == "delivered"]
 
-    # Step 4: Filter by End Time (Actual) date
-    date_filter = pd.to_datetime(date_filter_str, dayfirst=True)
-    df = df[df['End Time (Actual)'].dt.date == date_filter.date()]
+    # Step 5: Filter by selected end date
+    try:
+        filter_date = datetime.strptime(filter_date_str, "%d/%m/%Y").date()
+    except ValueError:
+        return pd.DataFrame({'Error': ["Invalid date format. Use dd/mm/yyyy"]})
 
-    # Step 5: Add columns
+    df = df[df['End Time (Actual)'].dt.date == filter_date]
+
+    if df.empty:
+        return pd.DataFrame({'Info': ["No data found for selected date"]})
+
+    # Step 6: Delivery Type
     df['Delivery Type'] = df['Order Date'].apply(
-        lambda x: "Quick" if pd.notnull(x) and x.hour < 15 else "Non Quick"
+        lambda x: "Quick" if pd.notna(x) and 0 <= x.hour < 15 else "Non Quick"
     )
 
+    # Step 7: TAT calculation
     df['TAT'] = df['Order Date'].apply(
-        lambda x: datetime.combine(x.date(), datetime.max.time()) if x.hour < 15
-        else datetime.combine(x.date(), datetime.max.time()) + pd.Timedelta(days=1)
-        if pd.notnull(x) else pd.NaT
+        lambda x: x.replace(hour=23, minute=59, second=59) if pd.notna(x) and x.hour < 15
+        else (x + timedelta(days=1)).replace(hour=23, minute=59, second=59) if pd.notna(x)
+        else pd.NaT
     )
 
-    df['SLA STATUS'] = df.apply(
-        lambda row: "SLA Breach" if row['End Time (Actual)'] > row['TAT'] else "SLA Met", axis=1
+    # Step 8: SLA Status
+    df['SLA Status'] = df.apply(
+        lambda row: "SLA Breach" if pd.notna(row['End Time (Actual)']) and pd.notna(row['TAT']) and row['End Time (Actual)'] > row['TAT']
+        else "SLA Met" if pd.notna(row['End Time (Actual)']) and pd.notna(row['TAT'])
+        else "NA",
+        axis=1
     )
 
-    # Step 6: Group and summarize
-    summary = df.groupby('Order Dark Store')['SLA STATUS'].value_counts().unstack(fill_value=0)
-    summary = summary.reindex(columns=['SLA Met', 'SLA Breach'], fill_value=0).reset_index()
+    # Step 9: Summary Table
+    summary = df.groupby(['Order Dark Store', 'SLA Status']).size().unstack(fill_value=0)
+    summary.columns.name = None
+    summary = summary.rename(columns={'SLA Met': 'SLA MET COUNT', 'SLA Breach': 'SLA BREACH COUNT'})
 
-    # Step 7: Add percentage and total
-    summary['TOTAL DELIVERED ORDERS'] = summary['SLA Met'] + summary['SLA Breach']
-    summary['SLA MET%'] = (summary['SLA Met'] / summary['TOTAL DELIVERED ORDERS'] * 100).round().astype(str) + '%'
-    summary['SLA BREACH%'] = (summary['SLA Breach'] / summary['TOTAL DELIVERED ORDERS'] * 100).round().astype(str) + '%'
+    if 'SLA MET COUNT' not in summary.columns:
+        summary['SLA MET COUNT'] = 0
+    if 'SLA BREACH COUNT' not in summary.columns:
+        summary['SLA BREACH COUNT'] = 0
 
-    # Rename columns
-    summary.rename(columns={
-        'SLA Met': 'SLA MET COUNT',
-        'SLA Breach': 'SLA BREACH COUNT'
-    }, inplace=True)
+    summary['TOTAL DELIVERED ORDERS'] = summary['SLA MET COUNT'] + summary['SLA BREACH COUNT']
 
-    # Add Grand Total row
-    total_row = pd.DataFrame({
+    summary['SLA MET%'] = summary.apply(
+        lambda row: f"{round(row['SLA MET COUNT'] / row['TOTAL DELIVERED ORDERS'] * 100)}%" if row['TOTAL DELIVERED ORDERS'] > 0 else "0%",
+        axis=1
+    )
+
+    summary['SLA BREACH%'] = summary.apply(
+        lambda row: f"{round(row['SLA BREACH COUNT'] / row['TOTAL DELIVERED ORDERS'] * 100)}%" if row['TOTAL DELIVERED ORDERS'] > 0 else "0%",
+        axis=1
+    )
+
+    # Step 10: Grand Total row
+    total_delivered = summary['TOTAL DELIVERED ORDERS'].sum()
+    total_met = summary['SLA MET COUNT'].sum()
+    total_breach = summary['SLA BREACH COUNT'].sum()
+
+    grand_total = pd.DataFrame({
         'Order Dark Store': ['Grand Total'],
-        'SLA MET COUNT': [summary['SLA MET COUNT'].sum()],
-        'SLA BREACH COUNT': [summary['SLA BREACH COUNT'].sum()],
-        'TOTAL DELIVERED ORDERS': [summary['TOTAL DELIVERED ORDERS'].sum()],
-        'SLA MET%': [str(round(summary['SLA MET COUNT'].sum() / summary['TOTAL DELIVERED ORDERS'].sum() * 100)) + '%'],
-        'SLA BREACH%': [str(round(summary['SLA BREACH COUNT'].sum() / summary['TOTAL DELIVERED ORDERS'].sum() * 100)) + '%']
+        'SLA MET COUNT': [total_met],
+        'SLA BREACH COUNT': [total_breach],
+        'TOTAL DELIVERED ORDERS': [total_delivered],
+        'SLA MET%': [f"{round(total_met / total_delivered * 100)}%" if total_delivered > 0 else "0%"],
+        'SLA BREACH%': [f"{round(total_breach / total_delivered * 100)}%" if total_delivered > 0 else "0%"]
     })
 
-    final_result = pd.concat([summary, total_row], ignore_index=True)
-    return final_result
+    summary = summary.reset_index()
+    summary_final = pd.concat([summary, grand_total], ignore_index=True)
+
+    return summary_final

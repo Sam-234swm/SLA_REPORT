@@ -67,7 +67,7 @@ if uploaded_file and selected_date:
             if str(row[first_col]) == 'Grand Total':
                 return ['background-color: #ccff99; font-weight: bold'] * len(row)
             else:
-                return ['background-color: black'] * len(row)
+                return ['background-color: #ccf2ff'] * len(row)
         return df.style.apply(highlight, axis=1)
 
     st.subheader("📊 SLA Summary Table")

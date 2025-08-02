@@ -65,6 +65,9 @@ if uploaded_file and filter_date:
     def style_summary_table(df):
     first_col = df.columns[0]
     
+    def style_summary_table(df):
+    first_col = df.columns[0]
+
     def highlight(row):
         if str(row[first_col]) == 'Grand Total':
             return ['background-color: #ccff99; font-weight: bold'] * len(row)

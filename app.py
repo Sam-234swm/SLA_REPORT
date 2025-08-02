@@ -63,12 +63,16 @@ if uploaded_file and filter_date:
 
     # 🔷 CSS-styled table with colors
     def style_summary_table(df):
-        def highlight(row):
-            if row['Order Dark Store'] == 'Grand Total':
-                return ['background-color: #ccff99; font-weight: bold'] * len(row)
-            else:
-                return ['background-color: #ccf2ff'] * len(row)
-        return df.style.apply(highlight, axis=1)
+    first_col = df.columns[0]
+    
+    def highlight(row):
+        if str(row[first_col]) == 'Grand Total':
+            return ['background-color: #ccff99; font-weight: bold'] * len(row)
+        else:
+            return ['background-color: #ccf2ff'] * len(row)
+    
+    return df.style.apply(highlight, axis=1)
+
 
     st.markdown("### 📋 SLA Report Table")
     st.dataframe(style_summary_table(summary_final), use_container_width=True)

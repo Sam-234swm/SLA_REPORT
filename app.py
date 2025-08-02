@@ -10,7 +10,7 @@ date_filter = st.date_input("Select a delivery date to filter")
 
 if uploaded_file and date_filter:
     try:
-        df = pd.read_csv(uploaded_file, encoding='utf-8', engine='python', error_bad_lines=False)
+        pd.read_csv(uploaded_file, encoding="utf-8", engine="python", on_bad_lines="skip")
         result = process_sla_data(df, date_filter.strftime("%d/%m/%Y"))
 
         st.success("✅ Processed SLA report")

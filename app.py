@@ -1,21 +1,21 @@
-import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+import streamlit as st
+import matplotlib.pyplot as plt
 import re
 
 st.set_page_config(page_title="SLA Report", layout="wide")
-st.title("📊 SLA MET vs SLA BREACH REPORT")
+st.title("📦 SLA Performance Report")
 
-# Upload file
-uploaded_file = st.file_uploader("Upload ERP CSV File", type=["csv"])
-filter_date = st.date_input("Select Delivery End Date")
+uploaded_file = st.file_uploader("Upload your ERP CSV file", type=["csv"])
+selected_date = st.date_input("Select Delivery Date (End Time)", value=datetime.today())
 
-def clean_cell(val):
-    if pd.isna(val): return val
-    return re.sub(r'=\("?([^"]+)"?\)?', r'\1', str(val)).strip()
+if uploaded_file and selected_date:
+    def clean_cell(val):
+        if pd.isna(val):
+            return val
+        return re.sub(r'=\("?([^"]+)"?\)?', r'\1', str(val)).strip()
 
-if uploaded_file and filter_date:
     df_raw = pd.read_csv(uploaded_file, engine="python", on_bad_lines='skip')
     df = df_raw.applymap(clean_cell)
 
@@ -29,7 +29,7 @@ if uploaded_file and filter_date:
     ]
     df = df[df['Order Dark Store'].isin(valid_stores)]
     df = df[df['Order Status'].str.lower() == "delivered"]
-    df = df[df['End Time (Actual)'].dt.date == filter_date]
+    df = df[df['End Time (Actual)'].dt.date == selected_date]
 
     df['Delivery Type'] = df['Order Date'].apply(
         lambda x: "Quick" if pd.notna(x) and 0 <= x.hour < 15 else "Non Quick"
@@ -59,39 +59,32 @@ if uploaded_file and filter_date:
     grand_total['SLA BREACH%'] = 100 - grand_total['SLA MET%']
 
     summary_final = pd.concat([summary, grand_total])
-    summary_final.reset_index(inplace=True)
+    summary_final = summary_final.reset_index().rename(columns={"index": "Order Dark Store"})
 
-    # 🔷 CSS-styled table with colors
     def style_summary_table(df):
-    first_col = df.columns[0]
+        first_col = df.columns[0]
+        def highlight(row):
+            if str(row[first_col]) == 'Grand Total':
+                return ['background-color: #ccff99; font-weight: bold'] * len(row)
+            else:
+                return ['background-color: #ccf2ff'] * len(row)
+        return df.style.apply(highlight, axis=1)
 
-    def highlight(row):
-        if str(row[first_col]) == 'Grand Total':
-            return ['background-color: #ccff99; font-weight: bold'] * len(row)
-        else:
-            return ['background-color: #ccf2ff'] * len(row)
-    
-    return df.style.apply(highlight, axis=1)
-
-
-    st.markdown("### 📋 SLA Report Table")
+    st.subheader("📊 SLA Summary Table")
     st.dataframe(style_summary_table(summary_final), use_container_width=True)
 
-    # 📊 Bar Chart
-    st.markdown("### 📊 SLA MET% vs SLA BREACH%")
+    st.subheader("📈 SLA MET% vs SLA BREACH% Chart")
     labels = summary.index.tolist()
     x = range(len(labels))
     met = summary['SLA MET%']
     breach = summary['SLA BREACH%']
 
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(12, 5))
     ax.bar(x, met, label='SLA MET%', color='lightgreen')
     ax.bar(x, breach, bottom=met, label='SLA BREACH%', color='orangered')
-
     for i in x:
         ax.text(i, met[i] / 2, f"{met[i]}%", ha='center', va='center', fontsize=9)
         ax.text(i, met[i] + breach[i] / 2, f"{breach[i]}%", ha='center', va='center', fontsize=9)
-
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=45, ha='right')
     ax.set_ylabel('Percentage')
@@ -99,3 +92,6 @@ if uploaded_file and filter_date:
     ax.legend()
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     st.pyplot(fig)
+
+else:
+    st.info("📤 Please upload your file and select a date to see the report.")

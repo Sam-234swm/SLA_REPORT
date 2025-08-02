@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SLA Report</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h2>📊 SLA Report for {{ date }}</h2>
+        {% for table in tables %}
+            {{ table|safe }}
+        {% endfor %}
+        <br>
+        <a href="/">🔁 Upload Another File</a>
+    </div>
+</body>
+</html>

@@ -18,7 +18,11 @@ def upload_file():
             filename = secure_filename(uploaded_file.filename)
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             uploaded_file.save(file_path)
-            df = pd.read_csv(file_path, encoding='utf-8', engine='python', error_bad_lines=False)
+            try:
+                # Removed deprecated `error_bad_lines` — replaced with on_bad_lines
+                df = pd.read_csv(file_path, encoding='utf-8', engine='python', on_bad_lines='skip')
+            except Exception as e:
+                return f"<h3>Error reading CSV file: {e}</h3>"
             result = process_sla_data(df, date_filter)
             return render_template("report.html", tables=[result.to_html(classes="data", index=False)], date=date_filter)
     return render_template("upload.html")
